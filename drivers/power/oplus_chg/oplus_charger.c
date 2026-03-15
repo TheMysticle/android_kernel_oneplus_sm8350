@@ -80,6 +80,15 @@
 #endif
 #endif /* OPLUS_CHG_OP_DEF */
 #endif /* CONFIG_OPLUS_CHARGER_MTK */
+
+static bool limit_pd = 1;
+module_param(limit_pd, bool, 0644);
+
+bool oplus_chg_get_limit_pd(void)
+{
+	return limit_pd;
+}
+
 static struct oplus_chg_chip *g_charger_chip = NULL;
 
 #define MAX_UI_DECIMAL_TIME 24
@@ -4060,6 +4069,7 @@ void oplus_chg_set_input_current_limit(struct oplus_chg_chip *chip)
 {
 	int current_limit = 0;
 	bool is_mcu_fastchg = false;
+	bool is_pd_unlimited = false;
 	is_mcu_fastchg = (oplus_warp_get_fastchg_started()
 					&&(chip->vbatt_num != 2 || oplus_warp_get_fast_chg_type() != CHARGER_SUBTYPE_FASTCHG_WARP));
 
@@ -4098,7 +4108,11 @@ void oplus_chg_set_input_current_limit(struct oplus_chg_chip *chip)
 			}
 			break;
 		case POWER_SUPPLY_TYPE_USB_DCP:
-			current_limit = chip->limits.input_current_charger_ma;
+			if (chip->chg_ops->get_charger_subtype() == CHARGER_SUBTYPE_PD && !limit_pd) {
+				current_limit = 3000;
+			} else {
+				current_limit = chip->limits.input_current_charger_ma;
+			}
 #ifdef OPLUS_CHG_OP_DEF
 			if (chip->norchg_reconnect_count == 1) {
 				pr_info("norchg_reconnect_count = 1\n");
@@ -4118,7 +4132,12 @@ void oplus_chg_set_input_current_limit(struct oplus_chg_chip *chip)
 			return;
 	}
 
-	if ((chip->chg_ctrl_by_lcd) && (chip->led_on)) {
+// Bypass all limiters when PD unlimited mode is active
+is_pd_unlimited = (chip->charger_type == POWER_SUPPLY_TYPE_USB_DCP &&
+                        chip->chg_ops->get_charger_subtype() == CHARGER_SUBTYPE_PD && 
+                        !limit_pd);
+
+	if ((chip->chg_ctrl_by_lcd) && (chip->led_on) && !is_pd_unlimited) {
 		if (!chip->dual_charger_support || (chip->dual_charger_support && chip->charger_volt > 7500)) {
 			if (chip->led_temp_status == LED_TEMP_STATUS__HIGH) {
 				if (current_limit > chip->limits.input_current_led_ma_high){
@@ -4136,17 +4155,17 @@ void oplus_chg_set_input_current_limit(struct oplus_chg_chip *chip)
 			charger_xlog_printk(CHG_LOG_CRTI, "[BATTERY]LED STATUS CHANGED, IS ON\n");
 		}
 		if ((chip->chg_ctrl_by_camera) && (chip->camera_on)
-				&& (current_limit > chip->limits.input_current_camera_ma)) {
+				&& (current_limit > chip->limits.input_current_camera_ma) && !is_pd_unlimited) {
 			current_limit = chip->limits.input_current_camera_ma;
 			charger_xlog_printk(CHG_LOG_CRTI, "[BATTERY]CAMERA STATUS CHANGED, IS ON\n");
 		}
 	} else if ((chip->chg_ctrl_by_camera) && (chip->camera_on)
-			&&(current_limit > chip->limits.input_current_camera_ma)) {
+			&&(current_limit > chip->limits.input_current_camera_ma) && !is_pd_unlimited) {
 		current_limit = chip->limits.input_current_camera_ma;
 		charger_xlog_printk(CHG_LOG_CRTI, "[BATTERY]CAMERA STATUS CHANGED, IS ON\n");
 	}
 	if ((chip->chg_ctrl_by_calling) && (chip->calling_on)
-			&& (current_limit > chip->limits.input_current_calling_ma)) {
+			&& (current_limit > chip->limits.input_current_calling_ma) && !is_pd_unlimited) {
 		current_limit = chip->limits.input_current_calling_ma;
 		charger_xlog_printk(CHG_LOG_CRTI, "[BATTERY]calling STATUS CHANGED, IS ON\n");
 	}
